@@ -1,4 +1,4 @@
-#Define matches in the conf file as below
+#Define matches in the Search.txt file as below
 #---Internationalised Domain Names---
 #xn-- .*
 #---Google spoofs---
@@ -6,7 +6,7 @@
 
 $search = New-Object -TypeName "System.Collections.ArrayList"
 $dir = Split-Path -Path $PSCommandPath
-foreach ($l in Get-Content "$dir\Search.conf"){
+foreach ($l in Get-Content "$dir\Search.txt"){
 [void]$search.Add($l)
 }
 Write-Host "---Spoofind---"
