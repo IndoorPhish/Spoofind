@@ -1,4 +1,4 @@
----Google spoofs (These titles could be anything you like)---
+%Google spoofs (These titles could be anything you like)%
 .*g[0o]{2}gle.*
----Another Search (These titles could be anything you like)---
+%Another Search (You could have the title SAUSAGE, if you wanted)%
 .*bing\.com
