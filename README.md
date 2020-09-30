@@ -10,3 +10,4 @@ The format of the file should be:
 - Line 4: .*bing\.com
 
 You can search up to 4 days
+Thank You
