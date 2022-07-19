@@ -1,89 +1,125 @@
-#Define matches in the Search.txt file as below
-#---Internationalised Domain Names---
-#xn-- .*
-#---Google spoofs---
-#.*g[0o]{2}gle.*
+Function CreateTheHiveAlert {
+param(
+#Params that must be passed to TheHive
+[Parameter(mandatory=$True)] [string]$AlertTitle,
+[Parameter(mandatory=$True)] [string]$Description,
+[Parameter(mandatory=$True)] [string]$Source,
+[Parameter(mandatory=$True)] [int]$Severity,
+[Parameter(mandatory=$True)] $ioc_artifact
+)
+    [int]$tlp = 1
+#Insert your API endpoint for TheHive
+    [string]$API_Uri = "XXXXXX"
+    [string]$API_Method = "Post"
+    $AlertDescription = $Description -replace '<[^>]+>',''
+#API Token goes below
+$APIToken = "XXXXXX"
+    $API_headers = @{Authorization = "Bearer $APIToken"}
+$SourceRef = New-Guid
 
+    $body = @{
+        title = "$AlertTitle"
+        description = "$AlertDescription"
+        type = "external"
+        source = "$Source"
+        sourceRef = "$SourceRef"
+        severity = $Severity
+        tlp = $tlp
+artifacts = $ioc_artifact
+    }
+$JsonBody = $body | ConvertTo-Json
+Invoke-RestMethod -Uri $API_Uri -Headers $API_headers -Body $JsonBody -Method $API_Method -ContentType 'application/json' -Verbose
+}
+
+#Define regex matches below
 $search = New-Object -TypeName "System.Collections.ArrayList"
-$dir = get-location
-foreach ($l in Get-Content "$dir\Search.txt"){
-[void]$search.Add($l)
+[void]$search.Add("%Google%")
+[void]$search.Add(".*[g9]+[0o]{2,}[9g]+[l7i1t]+[3ea]+.*")
+[void]$search.Add("%Microsoft%")
+[void]$search.Add(".*(m|rn)+[1i7oa04]*[ck]+[rtf]+[0o]*[s5z]+[0o]+[ft]+.*")
+
+$dir = Get-Location
+$date = Get-Date
+#Check the previous day
+$date = $date.AddDays(-1).ToString("yyyy-MM-dd")
+$uri = "isc.sans.edu/api/recentdoma…" + $date + "?json"
+$dlFile = $date + "-DomainNames.json"
+
+#Get Domains from SANS
+Invoke-WebRequest -Uri "$uri" -OutFile "$dlFile" -UserAgent "Powershell Core" -ErrorAction Stop
+
+#Check if the output files already exist and delete them if they do
+$outFileTxt = "$dir\$date-Detections.txt"
+$outFileJSON = "$dir\$date-Detections.json"
+$bool = Test-Path -Path "$dir\$date-Detections.txt"
+$bool2 = Test-Path -Path "$dir\$date-Detections.json"
+if ($bool -eq $true){
+    Remove-Item -Path $outFileTxt
+    }
+if ($bool2 -eq $true){
+    Remove-Item -Path $outFileJSON
+    }
+
+#Add date to the top of the text file and add a square bracket to the json file
+$date | Set-Content -Path "$outFileTxt" -Force
+Set-Content -Path "$outFileJSON" -Value "[" -Force -NoNewline
+
+#Convert the downloaded file from json to run searches against it
+$data = Get-Content "$dir\$dlFile" | ConvertFrom-JSON
+
+#Counter count is used for determining the search currently running by ref'ing the array
+#Counter results is used at the end to determine if there were any matches
+[int]$count = 0
+[int]$results = 0
+
+ForEach ($s in $search){
+#For each item in the search list that does not contain a perecent as this is the search title
+    if ($s -notcontains "%"){
+        ForEach ($line in $data) {
+            if ($($line.domainname) -match $s){
+                $results++
+#This part just grabs the search name by referencing the search in the list -1
+$name = $count-1
+$searchName = $search[$name].trim("%")
+#Determine if an IP is resolved - mainly used for sending to TheHive
+if ($($line.ip) -eq "0.0.0.0"){
+$desc = "An IP could not be resolved for this domain"
 }
-Write-Host "---Spoofind---"
-[int]$days = 0
-
-#Check input
-do {
-                $days = Read-Host -Prompt 'How many days should be checked? Choose 1-4'
-                Write-Host ""
-} until ($days -gt 0 -and $days -lt 5)
-
-$currentDate = Get-Date;
-Write-Host "Checking new domain registrations for '$days' day(s)."
-$link = "http://whoisdownload.com/download-panel/free-download-file/"
-
-#Progress bar stats
-[float]$percent = 1/([int]$search.Count * [int]$days)
-$percent = $percent * 100
-$prog = [math]::Round($percent,2)
-Write-Progress -Activity "Search in Progress" -Id 1 -Status "$prog% Complete" -PercentComplete $prog
-
-Write-Host "."
-Write-Host "."
-Write-Host "."
-
-#Loop through required number of days
-for($i=[int]$days; $i -gt 0; $i--){
-    #Set the date of the match to the current date minus the number of days to match
-    $date = $currentDate.AddDays(-$i)
-    $date = $date.ToString("yyyy-MM-dd")
-    $file = $date + ".zip"
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($file)
-    $encodedFile = [System.Convert]::ToBase64String($bytes)
-    #/nrd is required by this site for some reason
-    $url = $encodedFile.trimend("=") + "=/nrd/home"
-    Write-Host "Fetching domains for $date and saving in $dir\$date-Detections.txt"
-	try{
-		$Response = Invoke-WebRequest -Uri $link$url -OutFile "$dir\$file" -ErrorAction Stop
-		$Status = $Response.StatusCode
-	}
-	catch{
-		$Status2 = $_.Exception.Response.StatusCode.value__
-		Write-Host "Something went wrong. HTTP Response code = $Status2."
-	}
-    Expand-Archive -Path "$dir\$file"
-    Move-Item -Path "$dir\$date\domain-names.txt" -Destination $dir -Force
-    Remove-Item -Path "$dir\$date\" -recurse
-    Remove-Item -Path "$dir\$file" -recurse
-    $bool = Test-Path -Path "$dir\$date-Domain-Names.txt"
-    if ($bool -eq $true){
-		Remove-Item -Path "$dir\$date-Domain-Names.txt"
-		}
-    Rename-Item -Path "$dir\domain-names.txt" -NewName "$date-Domain-Names.txt" -Force
-    $outFile = "$dir\$date-Detections.txt"
-    $bool2 = Test-Path -Path "$dir\$date-Detections.txt"
-    if ($bool2 -eq $true){
-        Remove-Item -Path "$dir\$date-Detections.txt"
-        }
-    $date | Set-Content -Path "$outFile" -Force
-    [int]$count = -1
-    ForEach ($s in $search){
-       if($s -notcontains "%"){
-        foreach($domain in Get-Content "$dir\$date-Domain-Names.txt") {
-            if($domain -match $s){
-                $name = $count-1
-		$searchName = $search[$name].trim("%")
-                $out = "Match found: $searchName --- $domain"
-                $out | Add-Content -Path $outFile			}
+else {
+$desc = "This domain resolved for the IP address $($line.ip)"
+}
+#Formatting for the txt and json files
+                $printTxt = "Match found: $searchName --- $($line.domainname), First Observed: $($line.firstseen), IP Resolution: $desc"
+$printJSON = "{""""match"""":""""$searchName"""",""""domainname"""":""""$($line.domainname)"""",""""ip"""":""""$($line.ip)"""",""""type"""":""""$($line.type)"""",""""firstseen"""":""""$($line.firstseen)""""},"
+                $printTxt | Add-Content -Path "$outFileTxt"
+$printJSON | Add-Content -Path "$outFileJSON" -NoNewline
+$AlertTitle = "Suspicious Domain Registration Identified: $($line.domainname)"
+$Description = "The domain $($line.domainname) was first observed on $($line.firstseen) and has matched search criteria for """"$searchName"""". This could be used for phishing or other nefarious purposes. $desc."
+$ioc_artifact = @()
+$ioc_artifact += @(
+[ordered]@{
+"datatype" = "domain";
+"data" = $($line.domainname);
+"message" = "domain";
+"ioc" = $True;
+"sighted" = $True;
+}
+)
+#Call TheHive function to send data
+#CreateTheHiveAlert -AlertTitle $AlertTitle -Description $Description -Source "Suspicious Domain Registrations" -Severity 1
+}
         }
     }
-        $count++
-        $prog = [float]$prog + [float]$percent
-        $prog = [math]::Round($prog,2)
-        if ($prog -gt 100){
-            $prog = 100
-            }
-        Write-Progress -Activity "Search in Progress" -Id 1 -Status "$prog% Complete" -PercentComplete $prog
-    }
+    $count++
 }
-Write-Host "Complete."
+#Remove files if no results
+if ($results -eq 0){
+Remove-Item -Path $outFileTxt
+Remove-Item -Path $outFileJSON
+}
+#If files then remove the final comma and add in a square bracket to make the json clean
+else {
+$t = Get-Content "$outFileJSON"
+$t.TrimEnd(',') | Set-Content -Path "$outFileJSON" -Force -NoNewline
+Add-Content -Path "$outFileJSON" -Value "]" -NoNewline
+}
